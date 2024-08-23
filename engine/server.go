@@ -90,6 +90,7 @@ func (server *Server) consume() {
 	// for conn := range server.queue {
 	// 	fmt.Printf("[Server] Available capacity, processing connection from queue: %s\n", conn.RemoteAddr())
 	// 	server.activeConnections++
+	// server.wg.Add(1)
 	// 	go server.handleConnection(conn)
 	// }
 }
@@ -131,7 +132,7 @@ func (server *Server) timeout() {
 	defer server.wg.Done()
 
 	var timeInactive int = 0
-	var dots string = "..."
+	var dots string = "."
 
 	for {
 		time.Sleep(1 * time.Second)
@@ -140,16 +141,16 @@ func (server *Server) timeout() {
 			timeInactive++
 		} else {
 			timeInactive = 0
-			dots = "..."
+			dots = "."
 		}
 
 		if timeInactive%2 != 0 {
-			dots += "."
 			fmt.Printf("[Server] Waiting for connections%s\n", dots)
+			dots += "."
 		}
 
 		if timeInactive == server.maxTimeInactive {
-			fmt.Printf("[Server] Server inactive for %ds.\n", server.maxTimeInactive)
+			fmt.Printf("[Server] Server inactive for %ds, shutting down.\n", server.maxTimeInactive)
 			server.flush()
 			return
 		}
@@ -157,8 +158,6 @@ func (server *Server) timeout() {
 }
 
 func (server *Server) flush() {
-	fmt.Println("[Server] Shutting down server...")
-
 	defer close(server.queue)
 	server.inactive = true
 	server.listener.Close()
@@ -214,7 +213,6 @@ func (server *Server) handleConnection(conn net.Conn) {
 // }
 
 func slowQuery() {
-	// rand.Seed(time.Now().UnixNano())
-	test := rand.Intn(4) + 3
-	time.Sleep(time.Duration(test) * time.Second)
+	executionTime := rand.Intn(4) + 3
+	time.Sleep(time.Duration(executionTime) * time.Second)
 }
