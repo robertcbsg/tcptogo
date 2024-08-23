@@ -1,0 +1,1 @@
+A simple TCP server from scratch, exploring concurrency and golang basics.
