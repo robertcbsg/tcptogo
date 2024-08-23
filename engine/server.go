@@ -22,8 +22,8 @@ type Server struct {
 }
 
 func New(address string) (server *Server) {
-	capacity := 2
-	timeout := 10 // in seconds
+	capacity := 1
+	timeout := 5 // in seconds
 
 	return &Server{
 		Address:           address,
@@ -42,7 +42,7 @@ func (server *Server) Start() {
 		fmt.Println("Error setting up tcp listener:", err)
 		return
 	}
-	fmt.Printf("TCP server listening on port %s...\n\n", server.Address)
+	fmt.Printf("[Server] TCP server listening on port %s...\n", server.Address)
 
 	defer server.listener.Close()
 
@@ -59,17 +59,21 @@ func (server *Server) open() {
 
 func (server *Server) handleTimeout() {
 	var inactiveTime int = 0
+	var msg string = ""
+	var timeoutMarker string = "."
+
 	for {
 		time.Sleep(1 * time.Second)
-		if server.readActiveConnections() == 0 && len(server.queue) == 0 {
+		if server.activeConnections == 0 && len(server.queue) == 0 {
 			inactiveTime++
-			// if inactiveTime == 1 {
-			// 	fmt.Printf("[Server] Inactive for %d second...\n", inactiveTime)
-			// } else {
-			// 	fmt.Printf("[Server] Inactive for %d seconds...\n", inactiveTime)
-			// }
+
+			if inactiveTime%2 != 0 {
+				msg += timeoutMarker
+				fmt.Printf("[Server] Waiting%s\n", msg)
+			}
 		} else {
 			inactiveTime = 0
+			msg = ""
 		}
 
 		if inactiveTime == server.timeout {
@@ -97,15 +101,16 @@ func (server *Server) accept() {
 			continue
 		}
 
-		fmt.Printf("[%s] New connection received.\n", conn.RemoteAddr())
+		fmt.Printf("[Server] New connection received: %s\n", conn.RemoteAddr())
 
-		if server.readActiveConnections() >= server.Capacity {
-			server.queue <- conn
-			fmt.Printf("[%s] No capacity, queueing connection...\n", conn.RemoteAddr())
-		} else {
-			server.updateActiveConnections(1)
-			go server.handleConnection(conn)
-		}
+		server.queue <- conn
+
+		// if server.readActiveConnections() >= server.Capacity {
+		// 	fmt.Printf("[%s] No capacity, queueing connection...\n", conn.RemoteAddr())
+		// } else {
+		// 	server.updateActiveConnections(1)
+		// 	go server.handleConnection(conn)
+		// }
 	}
 }
 
@@ -117,13 +122,13 @@ func (server *Server) consume() {
 			return
 		}
 
-		if server.readActiveConnections() < server.Capacity && len(server.queue) > 0 {
+		if server.activeConnections < server.Capacity && len(server.queue) > 0 {
 			conn := <-server.queue
-			fmt.Printf("[%s] Available capacity, processing connection from queue.\n", conn.RemoteAddr())
-			server.updateActiveConnections(1)
+			fmt.Printf("[Server] Available capacity, processing connection from queue: %s\n", conn.RemoteAddr())
+			// server.updateActiveConnections(1)
+			server.activeConnections++
 			go server.handleConnection(conn)
 		}
-
 	}
 }
 
@@ -142,10 +147,10 @@ func (server *Server) handleConnection(conn net.Conn) {
 
 	slowQuery()
 
-	fmt.Printf(
-		"\n*******Start buffer*******\n%s********End buffer********\n\n",
-		string(buffer),
-	)
+	// fmt.Printf(
+	// 	"\n*******Start buffer*******\n%s********End buffer********\n\n",
+	// 	string(buffer),
+	// )
 
 	// Write buffer
 	if _, err := conn.Write([]byte("Message Received.")); err != nil {
@@ -156,7 +161,8 @@ func (server *Server) handleConnection(conn net.Conn) {
 	defer func() {
 		fmt.Printf("[%s] Connection closed.\n", conn.RemoteAddr())
 		time.Sleep(500 * time.Millisecond)
-		server.updateActiveConnections(-1)
+		// server.updateActiveConnections(-1)
+		server.activeConnections--
 		conn.Close()
 	}()
 }
