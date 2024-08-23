@@ -47,12 +47,12 @@ func (server *Server) Start() {
 	defer server.listener.Close()
 
 	server.inactive = false
-	server.Open()
+	server.open()
 }
 
-func (server *Server) Open() {
-	go server.Consume()
-	go server.AcceptLoop()
+func (server *Server) open() {
+	go server.consume()
+	go server.accept()
 
 	server.handleTimeout()
 }
@@ -85,7 +85,7 @@ func (server *Server) handleTimeout() {
 }
 
 // Accept incoming TCP connections, queue connections when capacity has been reached.
-func (server *Server) AcceptLoop() {
+func (server *Server) accept() {
 	for {
 		conn, err := server.listener.Accept()
 		if err != nil {
@@ -110,7 +110,7 @@ func (server *Server) AcceptLoop() {
 }
 
 // Handle queue connections once server has freed up.
-func (server *Server) Consume() {
+func (server *Server) consume() {
 	for {
 		if server.inactive {
 			fmt.Println("[Server] Terminating queue consumer...")
