@@ -17,7 +17,7 @@ func main() {
 
 	// listener.Read()
 
-	server := tcp.New(":8080", 1)
+	server := tcp.New(":8080")
 
 	server.Start()
 }

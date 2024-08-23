@@ -16,15 +16,20 @@ type Server struct {
 
 	listener          net.Listener
 	queue             chan net.Conn
+	timeout           int
 	activeConnections int
 	inactive          bool
 }
 
-func New(address string, capacity int) (server *Server) {
+func New(address string) (server *Server) {
+	capacity := 2
+	timeout := 10 // in seconds
+
 	return &Server{
 		Address:           address,
 		Capacity:          capacity,
 		queue:             make(chan net.Conn, capacity),
+		timeout:           timeout,
 		activeConnections: 0,
 		inactive:          true,
 	}
@@ -49,10 +54,10 @@ func (server *Server) Open() {
 	go server.Consume()
 	go server.AcceptLoop()
 
-	server.handleTimeout(10)
+	server.handleTimeout()
 }
 
-func (server *Server) handleTimeout(timeout int) {
+func (server *Server) handleTimeout() {
 	var inactiveTime int = 0
 	for {
 		time.Sleep(1 * time.Second)
@@ -67,8 +72,8 @@ func (server *Server) handleTimeout(timeout int) {
 			inactiveTime = 0
 		}
 
-		if inactiveTime == timeout {
-			fmt.Printf("[Server] Server inactive for %ss.", server.Tim)
+		if inactiveTime == server.timeout {
+			fmt.Printf("[Server] Server inactive for %ds.\n", server.timeout)
 			fmt.Println("[Server] Shutting down...")
 			server.inactive = true
 			server.listener.Close()
