@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"time"
 )
 
-var mutex sync.Mutex
+// var mutex sync.Mutex
 
 type Server struct {
 	Address  string
@@ -104,13 +103,6 @@ func (server *Server) accept() {
 		fmt.Printf("[Server] New connection received: %s\n", conn.RemoteAddr())
 
 		server.queue <- conn
-
-		// if server.readActiveConnections() >= server.Capacity {
-		// 	fmt.Printf("[%s] No capacity, queueing connection...\n", conn.RemoteAddr())
-		// } else {
-		// 	server.updateActiveConnections(1)
-		// 	go server.handleConnection(conn)
-		// }
 	}
 }
 
@@ -125,7 +117,6 @@ func (server *Server) consume() {
 		if server.activeConnections < server.Capacity && len(server.queue) > 0 {
 			conn := <-server.queue
 			fmt.Printf("[Server] Available capacity, processing connection from queue: %s\n", conn.RemoteAddr())
-			// server.updateActiveConnections(1)
 			server.activeConnections++
 			go server.handleConnection(conn)
 		}
@@ -135,8 +126,6 @@ func (server *Server) consume() {
 func (server *Server) handleConnection(conn net.Conn) {
 	fmt.Printf("[%s] Processing connection...\n", conn.RemoteAddr())
 
-	// server.activeConnections++
-	// server.updateActiveConnections(1)
 	buffer := make([]byte, 1024)
 
 	// Read buffer
@@ -161,25 +150,17 @@ func (server *Server) handleConnection(conn net.Conn) {
 	defer func() {
 		fmt.Printf("[%s] Connection closed.\n", conn.RemoteAddr())
 		time.Sleep(500 * time.Millisecond)
-		// server.updateActiveConnections(-1)
 		server.activeConnections--
 		conn.Close()
 	}()
 }
 
-func (server *Server) readActiveConnections() int {
-	mutex.Lock()
-	defer mutex.Unlock()
+// func (server *Server) updateActiveConnections(step int) {
+// 	mutex.Lock()
+// 	defer mutex.Unlock()
 
-	return server.activeConnections
-}
-
-func (server *Server) updateActiveConnections(step int) {
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	server.activeConnections += step
-}
+// 	server.activeConnections += step
+// }
 
 func slowQuery() {
 	time.Sleep(3 * time.Second)
