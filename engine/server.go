@@ -2,8 +2,10 @@ package engine
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,20 +17,22 @@ type Server struct {
 
 	listener          net.Listener
 	queue             chan net.Conn
-	timeout           int
+	wg                sync.WaitGroup
+	maxTimeInactive   int
 	activeConnections int
 	inactive          bool
 }
 
 func New(address string) (server *Server) {
+	// for simulating loads
 	capacity := 1
-	timeout := 5 // in seconds
+	maxQueued := 1
 
 	return &Server{
 		Address:           address,
 		Capacity:          capacity,
-		queue:             make(chan net.Conn, capacity),
-		timeout:           timeout,
+		queue:             make(chan net.Conn, maxQueued),
+		maxTimeInactive:   10, // in seconds
 		activeConnections: 0,
 		inactive:          true,
 	}
@@ -41,59 +45,64 @@ func (server *Server) Start() {
 		fmt.Println("Error setting up tcp listener:", err)
 		return
 	}
-	fmt.Printf("[Server] TCP server listening on port %s...\n", server.Address)
+	fmt.Printf("[Server] TCP server listening on port %s\n", server.Address)
 
-	defer server.listener.Close()
+	defer func() {
+		server.listener.Close()
+		defer fmt.Println("\nGoodbye.")
+	}()
 
 	server.inactive = false
 	server.open()
 }
 
 func (server *Server) open() {
+	defer fmt.Println("[Server] Processes terminated.")
+
+	server.wg.Add(3)
 	go server.consume()
 	go server.accept()
+	go server.timeout()
 
-	server.handleTimeout()
+	server.wg.Wait()
 }
 
-func (server *Server) handleTimeout() {
-	var inactiveTime int = 0
-	var msg string = ""
-	var timeoutMarker string = "."
-
+// Handle queued connections if the server has the capacity to.
+func (server *Server) consume() {
+	defer server.wg.Done()
+	// For simulating server capacity, i.e. maximum concurrent processes
 	for {
-		time.Sleep(1 * time.Second)
-		if server.activeConnections == 0 && len(server.queue) == 0 {
-			inactiveTime++
-
-			if inactiveTime%2 != 0 {
-				msg += timeoutMarker
-				fmt.Printf("[Server] Waiting%s\n", msg)
-			}
-		} else {
-			inactiveTime = 0
-			msg = ""
-		}
-
-		if inactiveTime == server.timeout {
-			fmt.Printf("[Server] Server inactive for %ds.\n", server.timeout)
-			fmt.Println("[Server] Shutting down...")
-			server.inactive = true
-			server.listener.Close()
-			time.Sleep(1 * time.Second) // let goroutines terminate first
-			fmt.Println("Goodbye.")
+		if server.inactive {
+			fmt.Println("[Server] Terminating consumer...")
 			return
 		}
+
+		if server.activeConnections < server.Capacity && len(server.queue) > 0 {
+			conn := <-server.queue
+			fmt.Printf("[Server] Available capacity, processing connection from queue: %s\n", conn.RemoteAddr())
+			server.activeConnections++
+			server.wg.Add(1)
+			go server.handleConnection(conn)
+		}
 	}
+
+	// Actual consumer should look like this
+	// for conn := range server.queue {
+	// 	fmt.Printf("[Server] Available capacity, processing connection from queue: %s\n", conn.RemoteAddr())
+	// 	server.activeConnections++
+	// 	go server.handleConnection(conn)
+	// }
 }
 
 // Accept incoming TCP connections, queue connections when capacity has been reached.
 func (server *Server) accept() {
+	defer server.wg.Done()
+
 	for {
 		conn, err := server.listener.Accept()
 		if err != nil {
 			if strings.Contains(err.Error(), "use of closed network connection") {
-				fmt.Println("[Server] Listener closed. Terminating accept loop...")
+				fmt.Println("[Server] Listener closed, terminating accept loop...")
 				return
 			}
 			fmt.Println("Error accepting TCP connection: ", err.Error())
@@ -102,25 +111,66 @@ func (server *Server) accept() {
 
 		fmt.Printf("[Server] New connection received: %s\n", conn.RemoteAddr())
 
-		server.queue <- conn
-	}
-}
-
-// Handle queue connections once server has freed up.
-func (server *Server) consume() {
-	for {
 		if server.inactive {
-			fmt.Println("[Server] Terminating queue consumer...")
+			fmt.Println("[Server] Server inactive, terminating accept loop...")
 			return
 		}
 
-		if server.activeConnections < server.Capacity && len(server.queue) > 0 {
-			conn := <-server.queue
-			fmt.Printf("[Server] Available capacity, processing connection from queue: %s\n", conn.RemoteAddr())
-			server.activeConnections++
-			go server.handleConnection(conn)
+		if len(server.queue) == cap(server.queue) {
+			fmt.Printf("[Server] Queue is currently full, cannot process %s\n", conn.RemoteAddr())
+			conn.Close()
+			continue
+		}
+
+		server.queue <- conn
+		fmt.Printf("[Server] Queued %s\n", conn.RemoteAddr())
+	}
+}
+
+func (server *Server) timeout() {
+	defer server.wg.Done()
+
+	var timeInactive int = 0
+	var dots string = "..."
+
+	for {
+		time.Sleep(1 * time.Second)
+
+		if server.activeConnections == 0 {
+			timeInactive++
+		} else {
+			timeInactive = 0
+			dots = "..."
+		}
+
+		if timeInactive%2 != 0 {
+			dots += "."
+			fmt.Printf("[Server] Waiting for connections%s\n", dots)
+		}
+
+		if timeInactive == server.maxTimeInactive {
+			fmt.Printf("[Server] Server inactive for %ds.\n", server.maxTimeInactive)
+			server.flush()
+			return
 		}
 	}
+}
+
+func (server *Server) flush() {
+	fmt.Println("[Server] Shutting down server...")
+
+	defer close(server.queue)
+	server.inactive = true
+	server.listener.Close()
+
+	fmt.Println("[Server] Flushing connections...")
+	for range len(server.queue) {
+		conn := <-server.queue
+
+		fmt.Printf("[Server] Force closing %s\n", conn.RemoteAddr())
+		conn.Close()
+	}
+	fmt.Println("[Server] Connections closed.")
 }
 
 func (server *Server) handleConnection(conn net.Conn) {
@@ -149,9 +199,10 @@ func (server *Server) handleConnection(conn net.Conn) {
 
 	defer func() {
 		fmt.Printf("[%s] Connection closed.\n", conn.RemoteAddr())
-		time.Sleep(500 * time.Millisecond)
+		// time.Sleep(500 * time.Millisecond)
 		server.activeConnections--
 		conn.Close()
+		server.wg.Done()
 	}()
 }
 
@@ -163,5 +214,7 @@ func (server *Server) handleConnection(conn net.Conn) {
 // }
 
 func slowQuery() {
-	time.Sleep(3 * time.Second)
+	// rand.Seed(time.Now().UnixNano())
+	test := rand.Intn(4) + 3
+	time.Sleep(time.Duration(test) * time.Second)
 }
