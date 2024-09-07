@@ -1,7 +1,7 @@
 package main
 
 import (
-	tcp "tcptogo/engine"
+	tcp "tcptogo"
 )
 
 func main() {
